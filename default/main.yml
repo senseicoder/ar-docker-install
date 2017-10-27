@@ -1,0 +1,5 @@
+---
+
+path_depot_scripts: /tmp
+pathphpscript_cleanupdocker: "{{ path_depot_scripts }}/docker_list_cleanup.php"
+ar_docker_cleanup_display_2rm: true

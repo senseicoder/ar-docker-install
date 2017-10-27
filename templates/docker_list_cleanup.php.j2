@@ -1,0 +1,38 @@
+<?php
+
+$aList = array();
+
+function is_version($s)
+{
+        $s = str_replace('.', '0', $s);
+        return is_numeric($s);
+}
+
+$stdin = fopen('php://stdin', 'r');
+while($s = trim(fgets(STDIN))) {
+        $s = preg_replace('/[ \t]+/', ';', trim($s));
+        $a = explode(';', $s);
+        $sName = $a[0];
+        $sVersion = $a[1];
+
+        if(is_version($sVersion)) {
+                if( ! isset($aList[$sName])) $aList[$sName] = array('last'=>'0', 'del'=>array(), 'list'=>array());
+                if(is_version($sVersion)) $aList[$sName]['list'][] = $sVersion;
+        }
+}
+
+foreach($aList as $sName => &$aRec) {
+        foreach($aRec['list'] as $sVersion) {
+                if(version_compare($sVersion, $aRec['last']) > 0) $aRec['last'] = $sVersion;
+        }
+
+        $aRec['del'] = array_diff($aRec['list'], array($aRec['last']));
+}
+
+$aDel = array();
+foreach($aList as $sName => $aRec) {
+        foreach($aRec['del'] as $sVersion) {
+                $aDel[] = sprintf('%s:%s', $sName, $sVersion);
+        }
+}
+if( ! empty($aDel)) echo implode(' ', $aDel);

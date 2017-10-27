@@ -1,136 +1,24 @@
 ---
 
-- set_fact:
-    compose_version: 1.6.0
+- name: déploiement script de nettoyage des images Docker
+  template: src=docker_list_cleanup.php.j2 dest="{{ pathphpscript_cleanupdocker }}" owner=root group=root mode=0644
 
-- apt: name={{ item }} update_cache=yes
-  with_items: [apt-transport-https, ca-certificates]
-  become: true
+- name: installation php-cli
+  package: name=php-cli state=installed
 
-- apt_repository: repo='deb http://get.docker.io/ubuntu docker main' state=absent
-  become: true
-- file: path=/etc/apt/sources.list.d/docker.list state=absent
-  become: true
-- name: repo ubuntu
-  apt_repository: repo='deb https://apt.dockerproject.org/repo ubuntu-trusty main' state=present
-  when: ansible_distribution == 'Ubuntu'
-  become: true
-- name: repo debian
-  apt_repository: repo='deb https://apt.dockerproject.org/repo debian-jessie main' state=present
-  when: ansible_distribution == 'Debian' 
-  become: true
-- apt_key: keyserver=p80.pool.sks-keyservers.net id=58118E89F3A912897C070ADBF76221572C52609D
-  environment: proxy_environment
+- name: collecte des images à supprimer
+  shell: "docker images | grep -v -e REPOSITORY | /usr/bin/php {{ pathphpscript_cleanupdocker }}"
+  register: dockerimg2delete
+  changed_when: false
+
+- name: images docker à supprimer
+  debug: var=dockerimg2delete.stdout
+  when: ar_docker_cleanup_display_2rm
+
+- name: suppression des images
+  shell: "docker rmi {{ dockerimg2delete.stdout }}"
   failed_when: false
-  become: true
-- file: path=/etc/apt/sources.list.d/apt_dockerproject_org_repo.list mode=0644 
-  become: true
+  when: dockerimg2delete.stdout | trim != ''
 
-- name: push de la clef repository
-  copy: src=files/aptkey dest=/tmp/aptkey
-  changed_when: false
-- name: chargement de la clef
-  apt_key: file=/tmp/aptkey state=present id=2C52609D
-  become: true
-- name: nettoyage clef repository
-  file: path=/tmp/aptkey state=absent
-  changed_when: false
-
-- name: retrait paquet lxc-docker
-  apt: name=lxc-docker state=absent
-  register: lxcdocker_removed
-  become: true
-- name: arret docker
-  service: name=docker enabled=no state=stopped
-  when: lxcdocker_removed.changed
-  become: true
-- name: nettoyage dossier /var/lib/docker
-  file: path=/var/lib/docker state=absent #sinon grosse charge IO quand on passe à docker-engine
-  when: lxcdocker_removed.changed
-  become: true
-
-- name: get kernel version
-  shell: uname -r
-  register: uname_r
-  changed_when: false
-  check_mode: no
-
-- name: get OS
-  shell: uname -s
-  register: uname_s
-  changed_when: false
-  check_mode: no
-  
-- name: get cpu plateform
-  shell: uname -m
-  register: uname_m
-  changed_when: false
-  check_mode: no
-  
-- apt: name={{ item }} update_cache=yes state=present
-  with_items: ["apt-transport-https", "ca-certificates", "docker-engine"]
-  become: true
-
-- name: download docker-compose
-  get_url: >
-    url="https://github.com/docker/compose/releases/download/{{ compose_version }}/docker-compose-{{ uname_s.stdout }}-{{ uname_m.stdout }}" 
-    dest="/usr/local/bin/docker-compose" mode=0755
-  environment: "{{ proxy_environment }}"
-  become: true
-
-- lineinfile: >
-    dest="/lib/systemd/system/docker.service" 
-    insertafter='\[Service\]' 
-    line='Environment="HTTP_PROXY=http://proxy.admin2.oxa.tld:3128/"'
-    state=present
-  when: "{{ setproxy }}"
-  notify:
-  - restart docker
-  become: true
-
-- name: check présence docker déplacé
-  stat: path=/space/docker
-  register: docker_moved
-
-- name: check présence dossier d'origine
-  stat: path=/var/lib/docker
-  register: dir_docker_origine_exists
-
-- name: stop docker
-  service:
-    name: docker
-    state: stopped
-  when: docker_moved.stat.exists == False
-  become: true
-
-- name: déplacement données docker
-  command: creates="/space/docker" mv /var/lib/docker /space/docker
-  when: docker_moved.stat.exists == False and dir_docker_origine_exists.stat.exists == True
-  become: true
-
-- name: move docker directory to /space
-  file: src=/space/docker dest=/var/lib/docker owner=root group=root state=link
-  when: docker_moved.stat.exists == False and dir_docker_origine_exists.stat.exists == True
-  become: true
-
-  #TODO mieux gérer ce point
-- name: retirer le noexec de /space
-  replace: dest=/etc/fstab regexp=',noexec' replace=''
-  become: true
-
-- shell: mount -o remount /space
-  become: true
-
-- stat: path=/bin/systemctl
-  register: is_systemd
-- shell: systemctl daemon-reload
-  when: is_systemd.stat.exists == True
-  become: true
-
-- service: name=docker enabled=no state=started
-  become: true
-
-- name: ajouter user au groupe docker
-  user: name={{ item }} groups=docker append=yes    
-  with_items: ['cedric', 'thierry', 'evens']
-  become: true
+- name: nettoyage
+  file: "{{ pathphpscript_cleanupdocker }}" state=absent

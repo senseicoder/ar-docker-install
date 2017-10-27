@@ -1,6 +1,0 @@
----
-
-  - name: restart docker
-    become: true
-    become_user: root
-    action: service name=docker state=restarted
