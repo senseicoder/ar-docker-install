@@ -1,0 +1,102 @@
+---
+
+  - apt: name={{ item }} update_cache=no
+    with_items: [apt-transport-https, ca-certificates]
+
+  - apt_repository: repo='deb http://get.docker.io/ubuntu docker main' state=absent
+  - file: path=/etc/apt/sources.list.d/docker.list state=absent
+  - name: repo ubuntu
+    apt_repository: repo='deb https://apt.dockerproject.org/repo ubuntu-trusty main' state=present
+    when: ansible_distribution == 'Ubuntu'
+  - name: repo debian
+    apt_repository: repo='deb https://apt.dockerproject.org/repo debian-jessie main' state=present
+    when: ansible_distribution == 'Debian' 
+  - apt_key: keyserver=p80.pool.sks-keyservers.net id=58118E89F3A912897C070ADBF76221572C52609D
+    environment: proxy_environment
+    failed_when: false
+  - file: path=/etc/apt/sources.list.d/apt_dockerproject_org_repo.list mode=0644 
+
+  - name: push de la clef repository
+    copy: src=files/aptkey dest=/tmp/aptkey
+    changed_when: false
+  - name: chargement de la clef
+    apt_key: file=/tmp/aptkey state=present id=2C52609D
+  - name: nettoyage clef repository
+    file: path=/tmp/aptkey state=absent
+    changed_when: false
+
+  - name: retrait paquet lxc-docker
+    apt: name=lxc-docker state=absent
+    register: lxcdocker_removed
+  - name: arret docker
+    service: name=docker enabled=no state=stopped
+    when: lxcdocker_removed.changed
+  - name: nettoyage dossier /var/lib/docker
+    file: path=/var/lib/docker state=absent #sinon grosse charge IO quand on passe à docker-engine
+    when: lxcdocker_removed.changed
+
+  - name: get kernel version
+    shell: uname -r
+    register: uname_r
+    changed_when: false
+    check_mode: no
+
+  - name: get OS
+    shell: uname -s
+    register: uname_s
+    changed_when: false
+    check_mode: no
+    
+  - name: get cpu plateform
+    shell: uname -m
+    register: uname_m
+    changed_when: false
+    check_mode: no
+    
+  - apt: name={{ item }} update_cache=no state=present
+    with_items: ["docker-engine"]
+
+  - name: download docker-compose
+    get_url: >
+      url="https://github.com/docker/compose/releases/download/{{ compose_version }}/docker-compose-{{ uname_s.stdout }}-{{ uname_m.stdout }}" 
+      dest="/usr/local/bin/docker-compose" mode=0755
+    environment: "{{ proxy_environment }}"
+
+  - lineinfile: >
+      dest="/lib/systemd/system/docker.service" 
+      insertafter='\[Service\]' 
+      line='Environment="HTTP_PROXY=http://proxy.admin2.oxa.tld:3128/"'
+      state=present
+    when: "{{ setproxy }}"
+    notify:
+    - restart docker
+
+  - name: check présence docker déplacé
+    stat: path=/space/docker
+    register: docker_moved
+ 
+  - name: stop docker
+    service:
+      name: docker
+      state: stopped
+    when: docker_moved.stat.exists == False
+
+  - name: déplacement données docker
+    command: creates="/space/docker" mv /var/lib/docker /space/docker
+    when: docker_moved.stat.exists == False
+
+  - name: move docker directory to /space
+    file: src=/space/docker dest=/var/lib/docker owner=root group=root state=link
+    when: docker_moved.stat.exists == False
+
+  - name: retirer le noexec de /space
+    replace: dest=/etc/fstab regexp=',noexec' replace=''
+
+  - shell: mount -o remount /space
+
+  - stat: path=/bin/systemctl
+    register: is_systemd
+  - shell: systemctl daemon-reload
+    when: is_systemd.stat.exists == True
+
+  - service: name=docker enabled=no state=started

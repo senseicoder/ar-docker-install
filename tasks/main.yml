@@ -1,24 +1,4 @@
 ---
 
-- name: déploiement script de nettoyage des images Docker
-  template: src=docker_list_cleanup.php.j2 dest="{{ pathphpscript_cleanupdocker }}" owner=root group=root mode=0644
-
-- name: installation php-cli
-  package: name=php-cli state=installed
-
-- name: collecte des images à supprimer
-  shell: "docker images | grep -v -e REPOSITORY | /usr/bin/php {{ pathphpscript_cleanupdocker }}"
-  register: dockerimg2delete
-  changed_when: false
-
-- name: images docker à supprimer
-  debug: var=dockerimg2delete.stdout
-  when: ar_docker_cleanup_display_2rm
-
-- name: suppression des images
-  shell: "docker rmi {{ dockerimg2delete.stdout }}"
-  failed_when: false
-  when: dockerimg2delete.stdout | trim != ''
-
-- name: nettoyage
-  file: "{{ pathphpscript_cleanupdocker }}" state=absent
+- import_tasks: install_soft.yml
+- import_tasks: image_cleanup.yml
